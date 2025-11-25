@@ -6,7 +6,7 @@ from astrbot.api.platform import MessageType
 import astrbot.api.message_components as Comp
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
 
-@register("astrbot_plugin_admin_notifier", "Foolllll", "群聊举报通知插件", "0.1")
+@register("astrbot_plugin_admin_notifier", "Foolllll", "举报通知", "1.0")
 class AdminNotifier(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -41,7 +41,7 @@ class AdminNotifier(Star):
             logger.error(f"获取群管理员列表失败: {e}")
             return None
 
-    @filter.command("举报")
+    @filter.command("举报", alias={"举办"})
     async def report_command(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         """举报指令：@所有管理员"""
         # 检查是否为群聊
@@ -69,9 +69,29 @@ class AdminNotifier(Star):
         bot_id = event.get_self_id()
         
         # 解析举报内容
-        report_reason = event.message_str.strip()
-        if not report_reason:
+        parts = event.message_str.strip().split(maxsplit=1)
+        if len(parts) > 1:
+            report_reason = parts[1].strip()
+        else:
             report_reason = "未说明"
+        
+        # 检查是否回复了某条消息，如果是则获取被举报人ID
+        reply_component = None
+        reported_user_id = None
+        for segment in event.get_messages():
+            if isinstance(segment, Comp.Reply):
+                reply_component = segment
+                # 尝试获取被回复消息的发送者ID
+                try:
+                    if isinstance(event, AiocqhttpMessageEvent):
+                        client = event.bot
+                        replied_msg = await client.api.call_action('get_msg', message_id=reply_component.id)
+                        if replied_msg and 'sender' in replied_msg:
+                            reported_user_id = str(replied_msg['sender'].get('user_id'))
+                            logger.info(f"检测到被举报人ID: {reported_user_id}")
+                except Exception as e:
+                    logger.warning(f"获取被回复消息发送者失败: {e}")
+                break
         
         # 获取群管理员列表
         admins = await self._get_group_admins(event)
@@ -79,39 +99,30 @@ class AdminNotifier(Star):
             yield event.plain_result("获取管理员列表失败，请稍后再试")
             return
         
-        # 过滤掉bot自己和举报人（如果他们也是管理员）
+        # 过滤掉bot自己、举报人、被举报人
         admins_to_notify = [
             admin for admin in admins 
             if str(admin.get("user_id")) != str(reporter_id) 
             and str(admin.get("user_id")) != str(bot_id)
+            and (not reported_user_id or str(admin.get("user_id")) != reported_user_id)
         ]
         
-        logger.info(f"群 {group_id} 管理员总数: {len(admins)}, 过滤后需通知: {len(admins_to_notify)} (已排除举报人{reporter_id}和Bot{bot_id})")
+        logger.info(f"群 {group_id} 管理员总数: {len(admins)}, 过滤后需通知: {len(admins_to_notify)} (已排除举报人{reporter_id}、Bot{bot_id}、被举报人{reported_user_id})")
         
         if not admins_to_notify:
             yield event.plain_result("没有可通知的管理员")
             return
-        
-        # 检查是否回复了某条消息
-        reply_component = None
-        for segment in event.get_messages():
-            if isinstance(segment, Comp.Reply):
-                reply_component = segment
-                break
         
         # 构建艾特管理员的消息
         message_components = []
         
         # 如果回复了消息，引用那条消息；否则引用举报人的消息
         if reply_component:
-            # 用户回复了某条消息进行举报
             message_components.append(Comp.Reply(id=reply_component.id))
         else:
-            # 用户没有回复消息，引用他发的举报消息
             message_components.append(Comp.Reply(id=event.message_obj.message_id))
         
-        # 添加通知文本
-        notification_text = f"【举报通知】\n举报人：{reporter_name}({reporter_id})\n举报内容：{report_reason}\n\n"
+        notification_text = f"【举报通知】\n举报人：{reporter_name}({reporter_id})\n举报内容：{report_reason}\n已@管理员："
         message_components.append(Comp.Plain(text=notification_text))
         
         # 艾特所有管理员
@@ -129,4 +140,4 @@ class AdminNotifier(Star):
 
     async def terminate(self):
         """插件卸载时调用"""
-        logger.info("管理员举报通知插件已卸载")
+        logger.info("举报通知插件已卸载")
