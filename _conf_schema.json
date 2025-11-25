@@ -1,0 +1,8 @@
+{
+  "whitelist_groups": {
+    "description": "群聊白名单",
+    "hint": "仅在白名单里的群启用本插件功能，不填表示所有群都启用",
+    "type": "list",
+    "default": []
+  }
+}
