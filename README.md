@@ -1,6 +1,20 @@
+<div align="center">
+
 # 📢 举报通知插件
 
-一个为 [AstrBot](https://astrbot.app) 设计的举报通知插件，群友可以通过指令快速@所有管理员。
+<i>🚀 一键通知，高效管理！</i>
+
+![License](https://img.shields.io/badge/license-AGPL--3.0-green?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.10+-blue?style=flat-square&logo=python&logoColor=white)
+![AstrBot](https://img.shields.io/badge/framework-AstrBot-ff6b6b?style=flat-square)
+
+</div>
+
+## ✨ 简介
+
+一款为 [**AstrBot**](https://github.com/AstrBotDevs/AstrBot) 设计的举报通知插件，群友可以通过指令快速 @ 所有管理员，并支持引用被举报消息，方便管理员及时处理违规内容。
+
+---
 
 ## ✨ 功能特性
 
@@ -9,6 +23,8 @@
 - 🔒 自动过滤通知举报事件当事人
 - ✅ 支持白名单群聊设置
 - 📝 显示举报人信息和举报原因
+
+---
 
 ## 📖 使用方法
 
@@ -43,14 +59,26 @@
 /举报
 ```
 
-## 📜 版本历史
+---
 
-* **v1.0**
-  - 实现基本举报功能
-  - 支持白名单群聊
+## 📅 更新日志
+
+**v1.0**
+
+- 实现基本举报功能
+- 支持白名单群聊
+
+---
 
 ## ❤️ 支持
 
 * [AstrBot 帮助文档](https://astrbot.app)
 * 如果您在使用中遇到问题，欢迎在本仓库提交 [Issue](https://github.com/Foolllll-J/astrbot_plugin_admin_notifier/issues)。
 
+---
+
+<div align="center">
+
+**如果本插件对你有帮助，欢迎点个 ⭐ Star 支持一下！**
+
+</div>
