@@ -1,6 +1,6 @@
 name: astrbot_plugin_admin_notifier # 插件唯一识别名
 display_name: 举报通知 # 用于展示的名字
 desc: 群友可以使用 /举报 指令@所有管理员 # 插件简短描述
-version: v1.0 # 插件版本号
+version: v1.1 # 插件版本号
 author: Foolllll # 作者
 repo: https://github.com/Foolllll-J/astrbot_plugin_admin_notifier # 插件的仓库地址

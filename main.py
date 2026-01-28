@@ -6,12 +6,14 @@ from astrbot.api.platform import MessageType
 import astrbot.api.message_components as Comp
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
 
-@register("astrbot_plugin_admin_notifier", "Foolllll", "举报通知", "1.0")
+@register("astrbot_plugin_admin_notifier", "Foolllll", "举报通知", "1.1")
 class AdminNotifier(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
         self.config = config if config else {}
         self.whitelist_groups: List[int] = [int(g) for g in self.config.get("whitelist_groups", [])]
+        self.report_whitelist: List[str] = [str(uid) for uid in self.config.get("report_whitelist", [])]
+        self.command_blacklist: List[str] = [str(uid) for uid in self.config.get("command_blacklist", [])]
         logger.info("举报通知插件已加载")
 
     async def _get_group_admins(self, event: AiocqhttpMessageEvent) -> Optional[List[Dict[str, Any]]]:
@@ -65,6 +67,12 @@ class AdminNotifier(Star):
         reporter_id = event.get_sender_id()
         reporter_name = event.get_sender_name()
         
+        # 检查指令黑名单
+        if str(reporter_id) in self.command_blacklist:
+            logger.info(f"用户 {reporter_id} 在指令黑名单中，忽略其举报指令")
+            event.stop_event()
+            return
+        
         # 获取bot自身ID
         bot_id = event.get_self_id()
         
@@ -88,6 +96,10 @@ class AdminNotifier(Star):
                         replied_msg = await client.api.call_action('get_msg', message_id=reply_component.id)
                         if replied_msg and 'sender' in replied_msg:
                             reported_user_id = str(replied_msg['sender'].get('user_id'))
+                            # 检查举报白名单
+                            if reported_user_id in self.report_whitelist:
+                                yield event.plain_result("该用户受保护，无法被举报。")
+                                return
                             logger.info(f"检测到被举报人ID: {reported_user_id}")
                 except Exception as e:
                     logger.warning(f"获取被回复消息发送者失败: {e}")
@@ -132,7 +144,7 @@ class AdminNotifier(Star):
             message_components.append(Comp.At(qq=admin_id, name=admin_name))
             # 在每个@之间加个空格，避免粘连
             if i < len(admins_to_notify) - 1:
-                message_components.append(Comp.Plain(text=" "))
+                message_components.append(Comp.Plain(text="\u200b \u200b"))
         
         # 发送消息
         yield event.chain_result(message_components)
