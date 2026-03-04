@@ -1,20 +1,92 @@
 {
   "whitelist_groups": {
     "description": "群聊白名单",
-    "hint": "仅在白名单里的群启用本插件功能，不填表示所有群都启用",
+    "hint": "仅在白名单中的群启用插件。",
     "type": "list",
     "default": []
   },
   "report_whitelist": {
     "description": "举报白名单",
-    "hint": "在此列表中的用户将无法被举报。",
+    "hint": "在此列表中的用户无法被举报。",
     "type": "list",
     "default": []
   },
   "command_blacklist": {
     "description": "指令黑名单",
-    "hint": "在此列表中的用户将无法使用举报指令。",
+    "hint": "在此列表中的用户无法使用举报指令。",
     "type": "list",
     "default": []
+  },
+  "group_rules": {
+    "type": "template_list",
+    "description": "群举报规则",
+    "hint": "按群配置通知规则。群号为空表示该规则对所有群生效。",
+    "default": [],
+    "templates": {
+      "default_rule": {
+        "name": "举报通知规则",
+        "hint": "可配置通知对象、自定义对象、排除对象和转发会话。",
+        "items": {
+          "groups": {
+            "description": "生效群聊列表",
+            "hint": "可填写多个群号，留空表示对所有群生效。",
+            "type": "list",
+            "default": []
+          },
+          "level_threshold": {
+            "description": "群等级限制",
+            "hint": "设置使用举报指令所需的最低群等级，0 表示不限制（群主/管理员默认放行）。",
+            "type": "int",
+            "slider": {
+              "min": 0,
+              "max": 100,
+              "step": 1
+            },
+            "default": 0
+          },
+          "notify_target": {
+            "description": "通知对象",
+            "hint": "管理员：群主+管理员；群主：仅群主；仅自定义：不自动按管理角色筛选。",
+            "type": "string",
+            "options": [
+              "管理员",
+              "群主",
+              "仅自定义"
+            ],
+            "default": "管理员"
+          },
+          "custom_notify_ids": {
+            "description": "自定义通知对象ID",
+            "hint": "额外通知的账号 ID 列表。",
+            "type": "list",
+            "default": []
+          },
+          "exclude_notify_ids": {
+            "description": "不通知对象ID",
+            "hint": "不通知的管理员或群主账号 ID 列表。",
+            "type": "list",
+            "default": []
+          },
+          "notify_group_ids": {
+            "description": "群聊通知会话",
+            "hint": "填写群号列表。",
+            "type": "list",
+            "default": []
+          },
+          "notify_private_ids": {
+            "description": "私聊通知会话",
+            "hint": "填写私聊 QQ 号列表。",
+            "type": "list",
+            "default": []
+          },
+          "suppress_group_mention_when_forward": {
+            "description": "存在转发目标时不在原群@",
+            "hint": "开启后，若成功发往通知会话，原群仅提示“已通知管理员”。",
+            "type": "bool",
+            "default": true
+          }
+        }
+      }
+    }
   }
 }
