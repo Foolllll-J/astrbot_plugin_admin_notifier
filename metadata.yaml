@@ -1,7 +1,7 @@
 name: astrbot_plugin_admin_notifier
 display_name: QQ 群举报
 desc: 群友可通过 /举报 指令通知管理员处理问题
-version: 1.2
+version: v1.2
 author: Foolllll
 repo: https://github.com/Foolllll-J/astrbot_plugin_admin_notifier
 astrbot_version: ">=4.10.4"
