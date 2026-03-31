@@ -208,13 +208,6 @@ class DemeritHandler:
         if error:
             return error
 
-        permission_error = await self._ensure_operator_is_group_admin(
-            valid_event,
-            group_id,
-        )
-        if permission_error:
-            return permission_error
-
         target = await self._resolve_target(
             valid_event,
             group_id,
@@ -248,13 +241,6 @@ class DemeritHandler:
         valid_event, group_id, error = self._validate_group_event(event)
         if error:
             return error
-
-        permission_error = await self._ensure_operator_is_group_admin(
-            valid_event,
-            group_id,
-        )
-        if permission_error:
-            return permission_error
 
         group_records = await self.store.get_group_records(group_id=group_id)
         if not group_records:
