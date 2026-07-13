@@ -91,6 +91,23 @@
               }
             }
           },
+          "warning_kick_threshold": {
+            "description": "警告踢出阈值",
+            "hint": "同一群成员累计警告达到该次数时自动踢出群聊；0 表示关闭自动踢出。",
+            "type": "int",
+            "slider": {
+              "min": 0,
+              "max": 100,
+              "step": 1
+            },
+            "default": 0
+          },
+          "warning_kick_reject_add_request": {
+            "description": "踢出后拒绝再次加群",
+            "hint": "开启后，自动踢出时同时设置不允许该成员再次申请加群。",
+            "type": "bool",
+            "default": false
+          },
           "notify_target": {
             "description": "通知对象",
             "hint": "管理员：群主+管理员；群主：仅群主；仅自定义：不自动按管理角色筛选。",

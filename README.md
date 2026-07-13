@@ -27,6 +27,7 @@
 - 🧷 支持引用举报时转发被引用原消息
 - 📶 支持按群等级限制使用举报指令
 - 🔇 支持 X 小时统计窗口内按举报次数阶梯式自动禁言
+- 👢 支持警告次数达到阈值后自动踢出群成员
 - ⚠️ 支持群内警告记录、查看、撤销功能
 
 ---
@@ -132,6 +133,8 @@
 | **`level_threshold`** | `int` | `0` | 使用举报指令所需最低群等级；`0` 表示不限制。 |
 | **`report_mute_window_hours`** | `int` | `1` | 统计同一用户最近多少小时内的被举报次数。 |
 | **`report_mute_rules`** | `template_list` | `[]` | 阶梯式禁言规则；每项包含 `threshold`（举报次数阈值）和 `duration_minutes`（禁言分钟数），为空则关闭自动禁言。 |
+| **`warning_kick_threshold`** | `int` | `0` | 同一群成员累计警告达到该次数时自动踢出群聊；`0` 表示关闭。 |
+| **`warning_kick_reject_add_request`** | `bool` | `false` | 自动踢出后是否拒绝该成员再次申请加群。 |
 | **`notify_target`** | `string` | `管理员` | 通知对象：`管理员`、`群主`、`仅自定义`。 |
 | **`custom_notify_ids`** | `list` | `[]` | 额外通知账号 ID 列表。 |
 | **`exclude_notify_ids`** | `list` | `[]` | 不通知账号 ID 列表。 |

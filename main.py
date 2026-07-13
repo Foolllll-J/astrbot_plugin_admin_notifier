@@ -13,7 +13,7 @@ class AdminNotifier(Star):
         super().__init__(context)
         self.config = config or {}
         self.report_handler = ReportHandler(self.config)
-        self.demerit_handler = DemeritHandler()
+        self.demerit_handler = DemeritHandler(self.config)
 
     @filter.command("举报", alias={"举办"})
     async def report_command(
