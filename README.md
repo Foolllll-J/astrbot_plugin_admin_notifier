@@ -26,6 +26,7 @@
 - 📤 支持通知转发到目标群聊/私聊会话
 - 🧷 支持引用举报时转发被引用原消息
 - 📶 支持按群等级限制使用举报指令
+- 🔇 支持 X 小时统计窗口内按举报次数阶梯式自动禁言
 - ⚠️ 支持群内警告记录、查看、撤销功能
 
 ---
@@ -129,12 +130,16 @@
 | :--- | :--- | :--- | :--- |
 | **`groups`** | `list` | `[]` | 生效群号列表。为空表示全局规则（对所有群生效）。 |
 | **`level_threshold`** | `int` | `0` | 使用举报指令所需最低群等级；`0` 表示不限制。 |
+| **`report_mute_window_hours`** | `int` | `1` | 统计同一用户最近多少小时内的被举报次数。 |
+| **`report_mute_rules`** | `template_list` | `[]` | 阶梯式禁言规则；每项包含 `threshold`（举报次数阈值）和 `duration_minutes`（禁言分钟数），为空则关闭自动禁言。 |
 | **`notify_target`** | `string` | `管理员` | 通知对象：`管理员`、`群主`、`仅自定义`。 |
 | **`custom_notify_ids`** | `list` | `[]` | 额外通知账号 ID 列表。 |
 | **`exclude_notify_ids`** | `list` | `[]` | 不通知账号 ID 列表。 |
 | **`notify_group_ids`** | `list` | `[]` | 群聊通知会话 ID。 |
 | **`notify_private_ids`** | `list` | `[]` | 私聊通知会话 ID。 |
 | **`suppress_group_mention_when_forward`** | `bool` | `true` | 成功转发后原群仅提示“已通知管理员”，不再 `@`。 |
+
+阶梯式禁言示例：`report_mute_window_hours` 设置为 `2`，`report_mute_rules` 添加 `{threshold: 3, duration_minutes: 10}` 和 `{threshold: 5, duration_minutes: 60}`，表示同一用户 2 小时内被举报 3 次禁言 10 分钟，被举报 5 次及以上禁言 60 分钟。
 
 ---
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
 
 import astrbot.api.message_components as Comp
@@ -8,6 +9,14 @@ from astrbot.api.platform import MessageType
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
+
+
+@dataclass
+class ReportMuteRule:
+    """举报触发禁言的阶梯规则。"""
+
+    threshold: int
+    duration_minutes: int
 
 
 @dataclass
@@ -21,6 +30,8 @@ class GroupRule:
     notify_group_ids: List[str]
     notify_private_ids: List[str]
     level_threshold: int
+    report_mute_window_hours: int
+    report_mute_rules: List[ReportMuteRule]
     suppress_group_mention_when_forward: bool
 
 
@@ -50,6 +61,7 @@ class ReportHandler:
         self.group_rules: List[GroupRule] = self._load_group_rules(
             self.config.get("group_rules", [])
         )
+        self._report_records: Dict[str, Dict[str, List[datetime]]] = {}
 
         logger.info(
             "举报通知插件已加载：白名单群=%s，规则数=%s",
@@ -114,6 +126,10 @@ class ReportHandler:
                         item.get("notify_private_ids", [])
                     ),
                     level_threshold=max(self._safe_int(item.get("level_threshold", 0), 0), 0),
+                    report_mute_window_hours=max(
+                        self._safe_int(item.get("report_mute_window_hours", 1), 1), 1
+                    ),
+                    report_mute_rules=self._load_report_mute_rules(item),
                     suppress_group_mention_when_forward=bool(
                         item.get("suppress_group_mention_when_forward", True)
                     ),
@@ -121,6 +137,50 @@ class ReportHandler:
             )
 
         return rules
+
+    def _load_report_mute_rules(self, item: Dict[str, Any]) -> List[ReportMuteRule]:
+        """读取并规范化举报禁言阶梯规则，按阈值从小到大排序。"""
+        raw_rules = item.get("report_mute_rules", [])
+        rules: List[ReportMuteRule] = []
+
+        if isinstance(raw_rules, list):
+            for raw_rule in raw_rules:
+                if not isinstance(raw_rule, dict):
+                    continue
+
+                threshold = max(
+                    self._safe_int(raw_rule.get("threshold", 0), 0), 0
+                )
+                duration_minutes = max(
+                    self._safe_int(raw_rule.get("duration_minutes", 0), 0), 0
+                )
+                if threshold > 0 and duration_minutes > 0:
+                    rules.append(
+                        ReportMuteRule(
+                            threshold=threshold,
+                            duration_minutes=duration_minutes,
+                        )
+                    )
+
+        # 兼容旧版单阈值配置，便于从 v1.3 之前的本地修改平滑升级。
+        legacy_threshold = max(
+            self._safe_int(item.get("report_mute_threshold", 0), 0), 0
+        )
+        legacy_duration_minutes = max(
+            self._safe_int(item.get("report_mute_duration_minutes", 0), 0), 0
+        )
+        if legacy_threshold > 0 and legacy_duration_minutes > 0:
+            rules.append(
+                ReportMuteRule(
+                    threshold=legacy_threshold,
+                    duration_minutes=legacy_duration_minutes,
+                )
+            )
+
+        deduped: Dict[int, ReportMuteRule] = {}
+        for rule in rules:
+            deduped[rule.threshold] = rule
+        return sorted(deduped.values(), key=lambda rule: rule.threshold)
 
     @staticmethod
     def _normalize_notify_target(value: Any) -> str:
@@ -210,6 +270,88 @@ class ReportHandler:
         except Exception as e:
             logger.warning("获取群成员等级失败，默认放行：%s", e)
             return True, 0
+
+    def _record_report_and_count(
+        self,
+        group_id: str,
+        reported_user_id: str,
+        window: timedelta,
+    ) -> int:
+        """记录被举报用户并返回最近窗口内的举报次数。"""
+        now = datetime.now(timezone.utc)
+        cutoff = now - window
+        group_records = self._report_records.setdefault(group_id, {})
+        records = [
+            item
+            for item in group_records.get(reported_user_id, [])
+            if item >= cutoff
+        ]
+        records.append(now)
+        group_records[reported_user_id] = records
+        return len(records)
+
+    @staticmethod
+    def _select_report_mute_rule(
+        rule: GroupRule,
+        report_count: int,
+    ) -> Optional[ReportMuteRule]:
+        """选择当前举报次数命中的最高阶梯规则。"""
+        selected: Optional[ReportMuteRule] = None
+        for mute_rule in rule.report_mute_rules:
+            if report_count >= mute_rule.threshold:
+                selected = mute_rule
+            else:
+                break
+        return selected
+
+    async def _mute_reported_user_if_needed(
+        self,
+        event: AiocqhttpMessageEvent,
+        group_id: str,
+        reported_user_id: Optional[str],
+        rule: Optional[GroupRule],
+    ) -> Tuple[int, Optional[int]]:
+        """达到阶梯规则时禁言被举报用户，返回(窗口内举报次数, 实际禁言分钟数)。"""
+        if not reported_user_id or not rule or not rule.report_mute_rules:
+            return 0, None
+
+        report_count = self._record_report_and_count(
+            group_id,
+            reported_user_id,
+            timedelta(hours=rule.report_mute_window_hours),
+        )
+        matched_rule = self._select_report_mute_rule(rule, report_count)
+        if not matched_rule:
+            return report_count, None
+
+        try:
+            await event.bot.api.call_action(
+                "set_group_ban",
+                group_id=int(group_id),
+                user_id=int(reported_user_id),
+                duration=matched_rule.duration_minutes * 60,
+            )
+            logger.info(
+                "举报阶梯禁言成功：group_id=%s, user_id=%s, window_hours=%s, count=%s, threshold=%s, duration_minutes=%s",
+                group_id,
+                reported_user_id,
+                rule.report_mute_window_hours,
+                report_count,
+                matched_rule.threshold,
+                matched_rule.duration_minutes,
+            )
+            return report_count, matched_rule.duration_minutes
+        except Exception as e:
+            logger.error(
+                "举报阶梯禁言失败：group_id=%s, user_id=%s, window_hours=%s, count=%s, threshold=%s, err=%s",
+                group_id,
+                reported_user_id,
+                rule.report_mute_window_hours,
+                report_count,
+                matched_rule.threshold,
+                e,
+            )
+            return report_count, None
 
     @staticmethod
     def _extract_admin_display_name(admin: Dict[str, Any], user_id: str) -> str:
@@ -522,6 +664,13 @@ class ReportHandler:
             yield event.plain_result("该用户受保护，无法被举报")
             return
 
+        report_count, mute_duration_minutes = await self._mute_reported_user_if_needed(
+            event=event,
+            group_id=group_id,
+            reported_user_id=reported_user_id,
+            rule=rule,
+        )
+
         admins = await self._get_group_admins(event)
         if not admins:
             yield event.plain_result("获取管理员列表失败，请稍后再试")
@@ -584,7 +733,12 @@ class ReportHandler:
                             raw_forwarded,
                             reply_component.id,
                         )
-                yield event.plain_result("已通知管理员")
+                if mute_duration_minutes is not None and rule:
+                    yield event.plain_result(
+                        f"已通知管理员；该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
+                    )
+                else:
+                    yield event.plain_result("已通知管理员")
                 return
 
         message_components = self._build_group_mention_message(
@@ -595,6 +749,16 @@ class ReportHandler:
             targets=targets,
             reply_component=reply_component,
         )
+        if mute_duration_minutes is not None and rule:
+            message_components.append(
+                Comp.Plain(
+                    text=(
+                        f"\n该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，"
+                        f"已禁言 {mute_duration_minutes} 分钟"
+                    )
+                )
+            )
+
         yield event.chain_result(message_components)
 
         logger.info(

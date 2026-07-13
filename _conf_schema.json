@@ -44,6 +44,53 @@
             },
             "default": 0
           },
+          "report_mute_window_hours": {
+            "description": "举报统计窗口（小时）",
+            "hint": "统计同一用户在最近多少小时内的被举报次数，最小为 1 小时。",
+            "type": "int",
+            "slider": {
+              "min": 1,
+              "max": 168,
+              "step": 1
+            },
+            "default": 1
+          },
+          "report_mute_rules": {
+            "type": "template_list",
+            "description": "举报阶梯禁言规则",
+            "hint": "按举报次数配置禁言时长。例如：3 次禁言 10 分钟，5 次禁言 60 分钟。为空则关闭自动禁言。",
+            "default": [],
+            "templates": {
+              "default_rule": {
+                "name": "阶梯禁言规则",
+                "hint": "当统计窗口内举报次数达到阈值时，按命中的最高阈值禁言。",
+                "items": {
+                  "threshold": {
+                    "description": "举报次数阈值",
+                    "hint": "统计窗口内达到该举报次数时触发本阶梯。",
+                    "type": "int",
+                    "slider": {
+                      "min": 1,
+                      "max": 100,
+                      "step": 1
+                    },
+                    "default": 3
+                  },
+                  "duration_minutes": {
+                    "description": "禁言时长（分钟）",
+                    "hint": "触发本阶梯后的禁言时长，单位分钟。",
+                    "type": "int",
+                    "slider": {
+                      "min": 1,
+                      "max": 43200,
+                      "step": 1
+                    },
+                    "default": 10
+                  }
+                }
+              }
+            }
+          },
           "notify_target": {
             "description": "通知对象",
             "hint": "管理员：群主+管理员；群主：仅群主；仅自定义：不自动按管理角色筛选。",
