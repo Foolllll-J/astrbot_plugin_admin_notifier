@@ -2,10 +2,14 @@ from typing import AsyncGenerator, Optional
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
+from astrbot.api.event.filter import EventMessageType, PlatformAdapterType
 from astrbot.api.star import Context, Star
 
 from .core.demerit import DemeritHandler
 from .core.reporting import ReportHandler
+
+
+KV_REPORT_RECORDS_KEY = "report_records"
 
 
 class AdminNotifier(Star):
@@ -15,7 +19,21 @@ class AdminNotifier(Star):
         self.report_handler = ReportHandler(self.config)
         self.demerit_handler = DemeritHandler(self.config)
 
+    async def initialize(self):
+        records = await self.get_kv_data(KV_REPORT_RECORDS_KEY, default={})
+        if records:
+            self.report_handler.set_report_records(records)
+            logger.info("已从 KV 恢复举报禁言记录，共 %s 个群记录", len(records))
+
+    async def terminate(self):
+        records = self.report_handler.get_report_records()
+        await self.put_kv_data(KV_REPORT_RECORDS_KEY, records)
+        logger.info("举报禁言记录已保存到 KV，共 %s 个群记录", len(records))
+        logger.info("QQ 群举报插件已卸载")
+
     @filter.command("举报", alias={"举办"})
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def report_command(
         self,
         event: AstrMessageEvent,
@@ -25,6 +43,8 @@ class AdminNotifier(Star):
             yield result
 
     @filter.command("警告", alias={"记过"})
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def warning_command(
         self,
         event: AstrMessageEvent,
@@ -37,6 +57,8 @@ class AdminNotifier(Star):
         )
 
     @filter.command("查看劣迹", alias={"查前科"})
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def show_demerit_command(
         self,
         event: AstrMessageEvent,
@@ -48,6 +70,8 @@ class AdminNotifier(Star):
         "查看劣迹群友",
         alias={"查看群友前科"},
     )
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def show_group_demerit_command(
         self,
         event: AstrMessageEvent,
@@ -59,12 +83,11 @@ class AdminNotifier(Star):
         "撤销警告",
         alias={"撤销劣迹", "撤销记过"},
     )
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def revoke_warning_command(
         self,
         event: AstrMessageEvent,
     ) -> AsyncGenerator[MessageEventResult, None]:
         """撤销指定群成员的某一条劣迹记录"""
         yield await self.demerit_handler.revoke_latest_record(event)
-
-    async def terminate(self):
-        logger.info("QQ 群举报插件已卸载")

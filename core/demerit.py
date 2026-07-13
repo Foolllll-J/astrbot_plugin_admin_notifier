@@ -7,7 +7,6 @@ from typing import Any, Iterable, Optional
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
-from astrbot.api.platform import MessageType
 from astrbot.api.star import StarTools
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
@@ -94,6 +93,27 @@ class DemeritStore:
                 for user_id, user_entry in users.items()
             }
 
+    async def clear_user_records(
+        self,
+        *,
+        group_id: str,
+        target_user_id: str,
+    ) -> int:
+        """清除指定用户的所有警告记录。返回清除的记录数。"""
+        async with self._lock:
+            data = self._load()
+            users = data.get("groups", {}).get(group_id, {}).get("users", {})
+            user_entry = users.get(target_user_id)
+            if not user_entry:
+                return 0
+            records = user_entry.get("records", [])
+            count = len(records)
+            del users[target_user_id]
+            if not users:
+                data.get("groups", {}).pop(group_id, None)
+            self._save(data)
+            return count
+
     def _load(self) -> dict[str, Any]:
         if not self._path.exists():
             return {"groups": {}}
@@ -156,10 +176,13 @@ class DemeritHandler:
                 for group_id in item.get("groups", [])
                 if str(group_id).strip()
             }
+            penalty_settings = item.get("penalty_settings", {}) or {}
             warning_kick_threshold = max(
-                self._safe_int(item.get("warning_kick_threshold", 0), 0), 0
+                self._safe_int(penalty_settings.get("warning_kick_threshold", 0), 0), 0
             )
-            reject_add_request = bool(item.get("warning_kick_reject_add_request", False))
+            reject_add_request = bool(
+                penalty_settings.get("warning_kick_reject_add_request", False)
+            )
             rules.append(
                 {
                     "groups": groups,
@@ -207,15 +230,11 @@ class DemeritHandler:
             allow_at=True,
         )
         if target is None:
-            return event.plain_result(
-                "请通过 @目标或引用消息指定要记录的成员"
-            )
+            return event.plain_result("请通过 @目标或引用消息指定要记录的成员")
 
         reason = self._extract_reason(event, command_names)
         if not reason:
-            return event.plain_result(
-                "请提供理由，例如：警告 @用户 打广告"
-            )
+            return event.plain_result("请提供理由，例如：警告 @用户 打广告")
 
         executor_name = await self._get_group_member_display_name(
             valid_event,
@@ -272,6 +291,15 @@ class DemeritHandler:
         if not rule:
             return False
 
+        bot_self_id = str(event.get_self_id() or "").strip()
+        if target_user_id == bot_self_id:
+            logger.info(
+                "警告阈值已达到但目标是 bot 自身，跳过踢出：group_id=%s, user_id=%s",
+                group_id,
+                target_user_id,
+            )
+            return False
+
         threshold = int(rule.get("warning_kick_threshold", 0) or 0)
         if threshold <= 0 or total_count < threshold:
             return False
@@ -306,15 +334,21 @@ class DemeritHandler:
                 "set_group_kick",
                 group_id=int(group_id),
                 user_id=int(target_user_id),
-                reject_add_request=bool(rule.get("warning_kick_reject_add_request", False)),
+                reject_add_request=bool(
+                    rule.get("warning_kick_reject_add_request", False)
+                ),
+            )
+            cleared = await self.store.clear_user_records(
+                group_id=group_id, target_user_id=target_user_id
             )
             logger.info(
-                "警告阈值踢出成功：group_id=%s, user_id=%s, name=%s, count=%s, threshold=%s",
+                "警告阈值踢出成功，已清除记录：group_id=%s, user_id=%s, name=%s, count=%s, threshold=%s, cleared=%s",
                 group_id,
                 target_user_id,
                 target_name,
                 total_count,
                 threshold,
+                cleared,
             )
             return True
         except Exception as exc:
@@ -343,9 +377,7 @@ class DemeritHandler:
             allow_at=True,
         )
         if target is None:
-            return event.plain_result(
-                "请通过 @目标或引用消息指定要查看的成员"
-            )
+            return event.plain_result("请通过 @目标或引用消息指定要查看的成员")
 
         records = await self.store.get_records(
             group_id=group_id,
@@ -424,11 +456,11 @@ class DemeritHandler:
             allow_at=True,
         )
         if target is None:
-            return event.plain_result(
-                "请通过 @目标或引用消息指定要撤销的成员"
-            )
+            return event.plain_result("请通过 @目标或引用消息指定要撤销的成员")
 
-        revoke_index = self._extract_revoke_index(event, ("撤销警告", "撤销劣迹", "撤销记过"))
+        revoke_index = self._extract_revoke_index(
+            event, ("撤销警告", "撤销劣迹", "撤销记过")
+        )
         if revoke_index is None:
             return event.plain_result("撤销序号必须是正整数，例如：撤销警告 @用户 2")
 
@@ -460,21 +492,9 @@ class DemeritHandler:
     def _validate_group_event(
         event: AstrMessageEvent,
     ) -> tuple[Optional[AiocqhttpMessageEvent], str, Optional[MessageEventResult]]:
-        if event.get_message_type() != MessageType.GROUP_MESSAGE:
-            return None, "", event.plain_result(
-                "此指令仅可在群聊中使用"
-            )
-
-        if not isinstance(event, AiocqhttpMessageEvent):
-            return None, "", event.plain_result(
-                "此功能仅支持 OneBot v11 群聊"
-            )
-
         group_id = str(event.get_group_id() or "").strip()
         if not group_id.isdigit():
-            return None, "", event.plain_result(
-                "无法识别当前群号"
-            )
+            return None, "", event.plain_result("无法识别当前群号")
 
         return event, group_id, None
 
@@ -603,10 +623,14 @@ class DemeritHandler:
                 message_id=int(message_id),
             )
         except Exception as exc:  # pragma: no cover - upstream API failure
-            logger.warning("解析引用消息发送者失败：message_id=%s, err=%s", message_id, exc)
+            logger.warning(
+                "解析引用消息发送者失败：message_id=%s, err=%s", message_id, exc
+            )
             return ""
 
-        sender = reply_message.get("sender", {}) if isinstance(reply_message, dict) else {}
+        sender = (
+            reply_message.get("sender", {}) if isinstance(reply_message, dict) else {}
+        )
         return str(sender.get("user_id", "")).strip()
 
     @staticmethod
@@ -721,7 +745,11 @@ class DemeritHandler:
         if not names:
             return normalized
 
-        pattern = r"^(?:[/／]\s*)?(?:" + "|".join(sorted(names, key=len, reverse=True)) + r")\s*"
+        pattern = (
+            r"^(?:[/／]\s*)?(?:"
+            + "|".join(sorted(names, key=len, reverse=True))
+            + r")\s*"
+        )
         return re.sub(pattern, "", normalized, count=1).strip()
 
     @staticmethod

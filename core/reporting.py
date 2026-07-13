@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
@@ -5,7 +6,6 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
-from astrbot.api.platform import MessageType
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
@@ -62,12 +62,44 @@ class ReportHandler:
             self.config.get("group_rules", [])
         )
         self._report_records: Dict[str, Dict[str, List[datetime]]] = {}
+        self._report_lock = asyncio.Lock()
+        self._cleanup_counter = 0
+        self._cleanup_interval = 100
 
         logger.info(
             "举报通知插件已加载：白名单群=%s，规则数=%s",
             len(self.whitelist_groups),
             len(self.group_rules),
         )
+
+    def set_report_records(self, records_raw: Dict[str, Dict[str, List[str]]]) -> None:
+        """从 KV 持久化恢复举报记录。"""
+        restored: Dict[str, Dict[str, List[datetime]]] = {}
+        for group_id, users in records_raw.items():
+            group_data: Dict[str, List[datetime]] = {}
+            for user_id, timestamps in users.items():
+                parsed: List[datetime] = []
+                for ts in timestamps:
+                    try:
+                        parsed.append(datetime.fromisoformat(ts))
+                    except (ValueError, TypeError):
+                        continue
+                if parsed:
+                    group_data[user_id] = parsed
+            if group_data:
+                restored[group_id] = group_data
+        self._report_records = restored
+
+    def get_report_records(self) -> Dict[str, Dict[str, List[str]]]:
+        """导出举报记录用于 KV 持久化。"""
+        result: Dict[str, Dict[str, List[str]]] = {}
+        for group_id, users in self._report_records.items():
+            group_data: Dict[str, List[str]] = {}
+            for user_id, timestamps in users.items():
+                group_data[user_id] = [ts.isoformat() for ts in timestamps]
+            if group_data:
+                result[group_id] = group_data
+        return result
 
     @staticmethod
     def _normalize_id_list(values: Any) -> List[str]:
@@ -99,14 +131,14 @@ class ReportHandler:
             if not isinstance(item, dict):
                 continue
 
-            groups = {
-                str(g).strip()
-                for g in item.get("groups", [])
-                if str(g).strip()
-            }
+            groups = {str(g).strip() for g in item.get("groups", []) if str(g).strip()}
+
+            notify_settings = item.get("notify_settings", {}) or {}
+            forward_settings = item.get("forward_settings", {}) or {}
+            penalty_settings_ = item.get("penalty_settings", {}) or {}
 
             notify_target = self._normalize_notify_target(
-                item.get("notify_target", "管理员")
+                notify_settings.get("notify_target", "管理员")
             )
 
             rules.append(
@@ -114,67 +146,65 @@ class ReportHandler:
                     groups=groups,
                     notify_target=notify_target,
                     custom_notify_ids=self._normalize_id_list(
-                        item.get("custom_notify_ids", [])
+                        notify_settings.get("custom_notify_ids", [])
                     ),
                     exclude_notify_ids=set(
-                        self._normalize_id_list(item.get("exclude_notify_ids", []))
+                        self._normalize_id_list(
+                            notify_settings.get("exclude_notify_ids", [])
+                        )
                     ),
                     notify_group_ids=self._normalize_id_list(
-                        item.get("notify_group_ids", [])
+                        forward_settings.get("notify_group_ids", [])
                     ),
                     notify_private_ids=self._normalize_id_list(
-                        item.get("notify_private_ids", [])
+                        forward_settings.get("notify_private_ids", [])
                     ),
-                    level_threshold=max(self._safe_int(item.get("level_threshold", 0), 0), 0),
+                    level_threshold=max(
+                        self._safe_int(item.get("level_threshold", 0), 0), 0
+                    ),
                     report_mute_window_hours=max(
-                        self._safe_int(item.get("report_mute_window_hours", 1), 1), 1
+                        self._safe_int(
+                            penalty_settings_.get("report_mute_window_hours", 0), 0
+                        ),
+                        0,
                     ),
-                    report_mute_rules=self._load_report_mute_rules(item),
+                    report_mute_rules=self._load_report_mute_rules(penalty_settings_),
                     suppress_group_mention_when_forward=bool(
-                        item.get("suppress_group_mention_when_forward", True)
+                        forward_settings.get(
+                            "suppress_group_mention_when_forward", True
+                        )
                     ),
                 )
             )
 
         return rules
 
-    def _load_report_mute_rules(self, item: Dict[str, Any]) -> List[ReportMuteRule]:
-        """读取并规范化举报禁言阶梯规则，按阈值从小到大排序。"""
-        raw_rules = item.get("report_mute_rules", [])
+    def _load_report_mute_rules(
+        self, penalty_settings: Dict[str, Any]
+    ) -> List[ReportMuteRule]:
+        """从空格分隔的字符串解析举报禁言阶梯规则。"""
+        thresholds_raw = str(penalty_settings.get("report_mute_thresholds", "") or "")
+        durations_raw = str(penalty_settings.get("report_mute_durations", "") or "")
+
+        thresholds = [self._safe_int(x, 0) for x in thresholds_raw.split() if x.strip()]
+        durations = [self._safe_int(x, 0) for x in durations_raw.split() if x.strip()]
+
         rules: List[ReportMuteRule] = []
-
-        if isinstance(raw_rules, list):
-            for raw_rule in raw_rules:
-                if not isinstance(raw_rule, dict):
-                    continue
-
-                threshold = max(
-                    self._safe_int(raw_rule.get("threshold", 0), 0), 0
+        for t, d in zip(thresholds, durations):
+            if t > 0 and d > 0:
+                rules.append(ReportMuteRule(threshold=t, duration_minutes=d))
+            elif t > 0:
+                logger.warning(
+                    "举报禁言规则解析：阈值 %s 缺少对应的有效时长，已忽略", t
                 )
-                duration_minutes = max(
-                    self._safe_int(raw_rule.get("duration_minutes", 0), 0), 0
-                )
-                if threshold > 0 and duration_minutes > 0:
-                    rules.append(
-                        ReportMuteRule(
-                            threshold=threshold,
-                            duration_minutes=duration_minutes,
-                        )
-                    )
 
-        # 兼容旧版单阈值配置，便于从 v1.3 之前的本地修改平滑升级。
-        legacy_threshold = max(
-            self._safe_int(item.get("report_mute_threshold", 0), 0), 0
-        )
-        legacy_duration_minutes = max(
-            self._safe_int(item.get("report_mute_duration_minutes", 0), 0), 0
-        )
-        if legacy_threshold > 0 and legacy_duration_minutes > 0:
-            rules.append(
-                ReportMuteRule(
-                    threshold=legacy_threshold,
-                    duration_minutes=legacy_duration_minutes,
-                )
+        if len(thresholds) != len(durations):
+            logger.warning(
+                "举报禁言阈值与时长数量不匹配（阈值 %s 个，时长 %s 个），"
+                "按最少数量取前 %s 条",
+                len(thresholds),
+                len(durations),
+                len(rules),
             )
 
         deduped: Dict[int, ReportMuteRule] = {}
@@ -271,24 +301,55 @@ class ReportHandler:
             logger.warning("获取群成员等级失败，默认放行：%s", e)
             return True, 0
 
-    def _record_report_and_count(
+    async def _record_report_and_count(
         self,
         group_id: str,
         reported_user_id: str,
         window: timedelta,
     ) -> int:
-        """记录被举报用户并返回最近窗口内的举报次数。"""
+        """记录被举报用户并返回窗口内的举报次数。window=0 时不限时间。"""
         now = datetime.now(timezone.utc)
-        cutoff = now - window
-        group_records = self._report_records.setdefault(group_id, {})
-        records = [
-            item
-            for item in group_records.get(reported_user_id, [])
-            if item >= cutoff
-        ]
-        records.append(now)
-        group_records[reported_user_id] = records
+        async with self._report_lock:
+            group_records = self._report_records.setdefault(group_id, {})
+
+            if window.total_seconds() > 0:
+                cutoff = now - window
+                records = [
+                    item
+                    for item in group_records.get(reported_user_id, [])
+                    if item >= cutoff
+                ]
+            else:
+                cutoff = None
+                records = list(group_records.get(reported_user_id, []))
+
+            records.append(now)
+            group_records[reported_user_id] = records
+
+            self._cleanup_counter += 1
+            if cutoff is not None and self._cleanup_counter >= self._cleanup_interval:
+                self._cleanup_counter = 0
+                self._cleanup_stale_records(cutoff)
+
         return len(records)
+
+    def _cleanup_stale_records(self, cutoff: datetime) -> None:
+        """移除 _report_records 中所有记录都过期的用户条目和空群组条目。"""
+        stale_groups: List[str] = []
+        for group_id, users in self._report_records.items():
+            stale_users: List[str] = []
+            for user_id, records in users.items():
+                valid = [r for r in records if r >= cutoff]
+                if valid:
+                    users[user_id] = valid
+                else:
+                    stale_users.append(user_id)
+            for uid in stale_users:
+                del users[uid]
+            if not users:
+                stale_groups.append(group_id)
+        for gid in stale_groups:
+            del self._report_records[gid]
 
     @staticmethod
     def _select_report_mute_rule(
@@ -315,7 +376,16 @@ class ReportHandler:
         if not reported_user_id or not rule or not rule.report_mute_rules:
             return 0, None
 
-        report_count = self._record_report_and_count(
+        bot_id = str(event.get_self_id() or "").strip()
+        if reported_user_id == bot_id:
+            logger.info(
+                "跳过禁言：被举报用户是 bot 自身，group_id=%s, reported_user_id=%s",
+                group_id,
+                reported_user_id,
+            )
+            return 0, None
+
+        report_count = await self._record_report_and_count(
             group_id,
             reported_user_id,
             timedelta(hours=rule.report_mute_window_hours),
@@ -616,14 +686,6 @@ class ReportHandler:
         event: AstrMessageEvent,
     ) -> AsyncGenerator[MessageEventResult, None]:
         """举报指令入口。"""
-        if event.get_message_type() != MessageType.GROUP_MESSAGE:
-            yield event.plain_result("此指令仅可在群聊中使用")
-            return
-
-        if not isinstance(event, AiocqhttpMessageEvent):
-            yield event.plain_result("此功能仅支持 OneBot v11 群聊")
-            return
-
         group_id = str(event.get_group_id() or "").strip()
         if not group_id.isdigit():
             yield event.plain_result("无法识别当前群号")
@@ -657,9 +719,11 @@ class ReportHandler:
         parts = event.message_str.strip().split(maxsplit=1)
         report_reason = parts[1].strip() if len(parts) > 1 else "未说明"
 
-        reply_component, reported_user_id, is_protected = await self._extract_reported_user_id(
-            event
-        )
+        (
+            reply_component,
+            reported_user_id,
+            is_protected,
+        ) = await self._extract_reported_user_id(event)
         if is_protected:
             yield event.plain_result("该用户受保护，无法被举报")
             return
@@ -734,9 +798,11 @@ class ReportHandler:
                             reply_component.id,
                         )
                 if mute_duration_minutes is not None and rule:
-                    yield event.plain_result(
-                        f"已通知管理员；该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
-                    )
+                    if rule.report_mute_window_hours == 0:
+                        mute_msg = f"已通知管理员；该用户累计被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
+                    else:
+                        mute_msg = f"已通知管理员；该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
+                    yield event.plain_result(mute_msg)
                 else:
                     yield event.plain_result("已通知管理员")
                 return
@@ -750,14 +816,11 @@ class ReportHandler:
             reply_component=reply_component,
         )
         if mute_duration_minutes is not None and rule:
-            message_components.append(
-                Comp.Plain(
-                    text=(
-                        f"\n该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，"
-                        f"已禁言 {mute_duration_minutes} 分钟"
-                    )
-                )
-            )
+            if rule.report_mute_window_hours == 0:
+                mute_suffix = f"\n该用户累计被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
+            else:
+                mute_suffix = f"\n该用户 {rule.report_mute_window_hours} 小时内被举报 {report_count} 次，已禁言 {mute_duration_minutes} 分钟"
+            message_components.append(Comp.Plain(text=mute_suffix))
 
         yield event.chain_result(message_components)
 

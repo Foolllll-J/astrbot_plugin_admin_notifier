@@ -20,12 +20,12 @@
   "group_rules": {
     "type": "template_list",
     "description": "群举报规则",
-    "hint": "按群配置通知规则。群号为空表示该规则对所有群生效。",
+    "hint": "按群配置通知、转发与自动惩罚规则。群号为空表示该规则对所有群生效。",
     "default": [],
     "templates": {
       "default_rule": {
-        "name": "举报通知规则",
-        "hint": "可配置通知对象、自定义对象、排除对象和转发会话。",
+        "name": "举报规则",
+        "hint": "可配置通知对象、转发目标、自动禁言与踢出惩罚。",
         "items": {
           "groups": {
             "description": "生效群聊列表",
@@ -44,110 +44,103 @@
             },
             "default": 0
           },
-          "report_mute_window_hours": {
-            "description": "举报统计窗口（小时）",
-            "hint": "统计同一用户在最近多少小时内的被举报次数，最小为 1 小时。",
-            "type": "int",
-            "slider": {
-              "min": 1,
-              "max": 168,
-              "step": 1
-            },
-            "default": 1
-          },
-          "report_mute_rules": {
-            "type": "template_list",
-            "description": "举报阶梯禁言规则",
-            "hint": "按举报次数配置禁言时长。例如：3 次禁言 10 分钟，5 次禁言 60 分钟。为空则关闭自动禁言。",
-            "default": [],
-            "templates": {
-              "default_rule": {
-                "name": "阶梯禁言规则",
-                "hint": "当统计窗口内举报次数达到阈值时，按命中的最高阈值禁言。",
-                "items": {
-                  "threshold": {
-                    "description": "举报次数阈值",
-                    "hint": "统计窗口内达到该举报次数时触发本阶梯。",
-                    "type": "int",
-                    "slider": {
-                      "min": 1,
-                      "max": 100,
-                      "step": 1
-                    },
-                    "default": 3
-                  },
-                  "duration_minutes": {
-                    "description": "禁言时长（分钟）",
-                    "hint": "触发本阶梯后的禁言时长，单位分钟。",
-                    "type": "int",
-                    "slider": {
-                      "min": 1,
-                      "max": 43200,
-                      "step": 1
-                    },
-                    "default": 10
-                  }
-                }
+          "notify_settings": {
+            "type": "object",
+            "description": "通知对象设置",
+            "hint": "配置举报通知的接收对象。",
+            "items": {
+              "notify_target": {
+                "description": "通知对象",
+                "hint": "管理员：群主+管理员；群主：仅群主；仅自定义：不自动按管理角色筛选。",
+                "type": "string",
+                "options": ["管理员", "群主", "仅自定义"],
+                "default": "管理员"
+              },
+              "custom_notify_ids": {
+                "description": "自定义通知对象ID",
+                "hint": "额外通知的账号 ID 列表。",
+                "type": "list",
+                "default": []
+              },
+              "exclude_notify_ids": {
+                "description": "不通知对象ID",
+                "hint": "不通知的管理员或群主账号 ID 列表。",
+                "type": "list",
+                "default": []
               }
             }
           },
-          "warning_kick_threshold": {
-            "description": "警告踢出阈值",
-            "hint": "同一群成员累计警告达到该次数时自动踢出群聊；0 表示关闭自动踢出。",
-            "type": "int",
-            "slider": {
-              "min": 0,
-              "max": 100,
-              "step": 1
-            },
-            "default": 0
+          "forward_settings": {
+            "type": "object",
+            "description": "转发目标设置",
+            "hint": "配置通知转发到的群聊/私聊会话。",
+            "items": {
+              "notify_group_ids": {
+                "description": "群聊通知会话",
+                "hint": "填写群号列表。",
+                "type": "list",
+                "default": []
+              },
+              "notify_private_ids": {
+                "description": "私聊通知会话",
+                "hint": "填写私聊 QQ 号列表。",
+                "type": "list",
+                "default": []
+              },
+              "suppress_group_mention_when_forward": {
+                "description": "存在转发目标时不在原群 @",
+                "hint": "开启后，若成功发往通知会话，原群仅提示“已通知管理员”。",
+                "type": "bool",
+                "default": true
+              }
+            }
           },
-          "warning_kick_reject_add_request": {
-            "description": "踢出后拒绝再次加群",
-            "hint": "开启后，自动踢出时同时设置不允许该成员再次申请加群。",
-            "type": "bool",
-            "default": false
-          },
-          "notify_target": {
-            "description": "通知对象",
-            "hint": "管理员：群主+管理员；群主：仅群主；仅自定义：不自动按管理角色筛选。",
-            "type": "string",
-            "options": [
-              "管理员",
-              "群主",
-              "仅自定义"
-            ],
-            "default": "管理员"
-          },
-          "custom_notify_ids": {
-            "description": "自定义通知对象ID",
-            "hint": "额外通知的账号 ID 列表。",
-            "type": "list",
-            "default": []
-          },
-          "exclude_notify_ids": {
-            "description": "不通知对象ID",
-            "hint": "不通知的管理员或群主账号 ID 列表。",
-            "type": "list",
-            "default": []
-          },
-          "notify_group_ids": {
-            "description": "群聊通知会话",
-            "hint": "填写群号列表。",
-            "type": "list",
-            "default": []
-          },
-          "notify_private_ids": {
-            "description": "私聊通知会话",
-            "hint": "填写私聊 QQ 号列表。",
-            "type": "list",
-            "default": []
-          },
-          "suppress_group_mention_when_forward": {
-            "description": "存在转发目标时不在原群@",
-            "hint": "开启后，若成功发往通知会话，原群仅提示“已通知管理员”。",
-            "type": "bool",
-            "default": true
+          "penalty_settings": {
+            "type": "object",
+            "description": "自动惩罚设置",
+            "hint": "举报次数达到阶梯时自动禁言，警告次数达到阈值时自动踢出。",
+            "items": {
+              "report_mute_window_hours": {
+                "description": "举报统计窗口（小时）",
+                "hint": "统计同一用户在最近多少小时内的被举报次数。设为 0 表示不限时间，累计全部历史次数。",
+                "type": "int",
+                "slider": {
+                  "min": 0,
+                  "max": 168,
+                  "step": 1
+                },
+                "default": 0
+              },
+              "report_mute_thresholds": {
+                "description": "举报次数阈值",
+                "hint": "多个阈值用空格隔开，与禁言时长一一对应。例如：3 5。为空则关闭自动禁言。",
+                "type": "string",
+                "default": ""
+              },
+              "report_mute_durations": {
+                "description": "禁言时长（分钟）",
+                "hint": "多个时长用空格隔开，与阈值一一对应。例如：10 60。",
+                "type": "string",
+                "default": ""
+              },
+              "warning_kick_threshold": {
+                "description": "警告踢出阈值",
+                "hint": "同一群成员累计警告达到该次数时自动踢出群聊；0 表示关闭自动踢出。",
+                "type": "int",
+                "slider": {
+                  "min": 0,
+                  "max": 100,
+                  "step": 1
+                },
+                "default": 0
+              },
+              "warning_kick_reject_add_request": {
+                "description": "踢出后拒绝再次加群",
+                "hint": "开启后，自动踢出时同时设置不允许该成员再次申请加群。",
+                "type": "bool",
+                "default": false
+              }
+            }
           }
         }
       }
